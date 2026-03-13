@@ -1,0 +1,3 @@
+- this repo mirrors selected Apache Doris upstream release branches
+- mirrored branches strip upstream GitHub workflows
+- default branch exists only for mirror automation and documentation
