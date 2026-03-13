@@ -15,7 +15,7 @@ concurrency:
 jobs:
   sync-fork:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Checkout mirror repo
@@ -52,25 +52,11 @@ jobs:
             } | awk '{print $2}' | sed 's#refs/heads/##' | sort -uV
           )"
 
-          TAGS="$(
-            {
-              git ls-remote --tags --refs upstream 'refs/tags/4.*'
-              git ls-remote --tags --refs upstream 'refs/tags/5.*'
-            } | awk '{print $2}' | sed 's#refs/tags/##' | sort -uV
-          )"
-
           if [ -n "${BRANCHES}" ]; then
             printf "%s\n" ${BRANCHES} > .branches
             echo "branch_list=$(paste -sd, .branches)" >> "$GITHUB_OUTPUT"
           else
             echo "branch_list=" >> "$GITHUB_OUTPUT"
-          fi
-
-          if [ -n "${TAGS}" ]; then
-            printf "%s\n" ${TAGS} > .tags
-            echo "tag_list=$(paste -sd, .tags)" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag_list=" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Preserve this repo's sync workflow
@@ -95,10 +81,9 @@ jobs:
             echo "==> Syncing branch: $BR"
 
             git fetch --prune upstream "$BR"
-            git checkout -B "$BR" "FETCH_HEAD"
-            git reset --hard "FETCH_HEAD"
+            git checkout -B "$BR" FETCH_HEAD
+            git reset --hard FETCH_HEAD
 
-            # Remove upstream workflow files, preserve only this sync workflow.
             rm -rf .github/workflows
             mkdir -p .github/workflows
 
@@ -112,20 +97,6 @@ jobs:
             fi
 
             git push origin "$BR" --force
-          done
-
-      - name: Sync tags starting with 4. or 5.
-        if: steps.discover.outputs.tag_list != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd doris-mirror
-      
-          IFS=',' read -ra TAGS <<< "${{ steps.discover.outputs.tag_list }}"
-          for TG in "${TAGS[@]}"; do
-            echo "==> Syncing tag: $TG"
-            git fetch --force upstream "refs/tags/$TG:refs/tags/$TG"
-            git push origin "refs/tags/$TG:refs/tags/$TG" --force
           done
 
       - name: Cleanup
