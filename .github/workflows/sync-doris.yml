@@ -120,7 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           cd doris-mirror
-
+      
           IFS=',' read -ra TAGS <<< "${{ steps.discover.outputs.tag_list }}"
           for TG in "${TAGS[@]}"; do
             echo "==> Syncing tag: $TG"
