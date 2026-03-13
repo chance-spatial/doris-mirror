@@ -15,7 +15,7 @@ concurrency:
 jobs:
   sync-fork:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout mirror repo
@@ -24,7 +24,7 @@ jobs:
           repository: chance-spatial/doris-mirror
           token: ${{ secrets.GITHUB_TOKEN }}
           path: doris-mirror
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Configure Git
         shell: bash
@@ -78,7 +78,6 @@ jobs:
         run: |
           set -euo pipefail
           cd doris-mirror
-
           mkdir -p /tmp/doris-mirror-workflows
           if [ -f .github/workflows/sync-doris.yml ]; then
             cp .github/workflows/sync-doris.yml /tmp/doris-mirror-workflows/sync-doris.yml
@@ -95,9 +94,9 @@ jobs:
           for BR in "${BRS[@]}"; do
             echo "==> Syncing branch: $BR"
 
-            git fetch --no-tags --depth=1 upstream "$BR"
-            git checkout -B "$BR" "upstream/$BR"
-            git reset --hard "upstream/$BR"
+            git fetch --prune upstream "$BR"
+            git checkout -B "$BR" "FETCH_HEAD"
+            git reset --hard "FETCH_HEAD"
 
             # Remove upstream workflow files, preserve only this sync workflow.
             rm -rf .github/workflows
@@ -125,7 +124,7 @@ jobs:
           IFS=',' read -ra TAGS <<< "${{ steps.discover.outputs.tag_list }}"
           for TG in "${TAGS[@]}"; do
             echo "==> Syncing tag: $TG"
-            git fetch --depth=1 upstream "refs/tags/$TG:refs/tags/$TG"
+            git fetch --force upstream "refs/tags/$TG:refs/tags/$TG"
             git push origin "refs/tags/$TG:refs/tags/$TG" --force
           done
 
