@@ -1,0 +1,138 @@
+name: Sync Apache Doris Mirror
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Daily at 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-doris
+  cancel-in-progress: true
+
+jobs:
+  sync-fork:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout mirror repo
+        uses: actions/checkout@v4
+        with:
+          repository: chance-spatial/doris-mirror
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: doris-mirror
+          fetch-depth: 1
+
+      - name: Configure Git
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd doris-mirror
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git config pull.rebase false
+
+      - name: Add upstream and discover refs to sync
+        id: discover
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd doris-mirror
+
+          git remote remove upstream >/dev/null 2>&1 || true
+          git remote add upstream https://github.com/apache/doris.git
+
+          BRANCHES="$(
+            {
+              git ls-remote --heads upstream 'refs/heads/branch-4.*'
+              git ls-remote --heads upstream 'refs/heads/branch-5.*'
+            } | awk '{print $2}' | sed 's#refs/heads/##' | sort -uV
+          )"
+
+          TAGS="$(
+            {
+              git ls-remote --tags --refs upstream 'refs/tags/4.*'
+              git ls-remote --tags --refs upstream 'refs/tags/5.*'
+            } | awk '{print $2}' | sed 's#refs/tags/##' | sort -uV
+          )"
+
+          if [ -n "${BRANCHES}" ]; then
+            printf "%s\n" ${BRANCHES} > .branches
+            echo "branch_list=$(paste -sd, .branches)" >> "$GITHUB_OUTPUT"
+          else
+            echo "branch_list=" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -n "${TAGS}" ]; then
+            printf "%s\n" ${TAGS} > .tags
+            echo "tag_list=$(paste -sd, .tags)" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag_list=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Preserve this repo's sync workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd doris-mirror
+
+          mkdir -p /tmp/doris-mirror-workflows
+          if [ -f .github/workflows/sync-doris.yml ]; then
+            cp .github/workflows/sync-doris.yml /tmp/doris-mirror-workflows/sync-doris.yml
+          fi
+
+      - name: Sync branches (branch-4.* and branch-5.*)
+        if: steps.discover.outputs.branch_list != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd doris-mirror
+
+          IFS=',' read -ra BRS <<< "${{ steps.discover.outputs.branch_list }}"
+          for BR in "${BRS[@]}"; do
+            echo "==> Syncing branch: $BR"
+
+            git fetch --no-tags --depth=1 upstream "$BR"
+            git checkout -B "$BR" "upstream/$BR"
+            git reset --hard "upstream/$BR"
+
+            # Remove upstream workflow files, preserve only this sync workflow.
+            rm -rf .github/workflows
+            mkdir -p .github/workflows
+
+            if [ -f /tmp/doris-mirror-workflows/sync-doris.yml ]; then
+              cp /tmp/doris-mirror-workflows/sync-doris.yml .github/workflows/sync-doris.yml
+            fi
+
+            git add -A
+            if ! git diff --cached --quiet; then
+              git commit -m "Strip upstream GitHub workflows"
+            fi
+
+            git push origin "$BR" --force
+          done
+
+      - name: Sync tags starting with 4. or 5.
+        if: steps.discover.outputs.tag_list != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd doris-mirror
+
+          IFS=',' read -ra TAGS <<< "${{ steps.discover.outputs.tag_list }}"
+          for TG in "${TAGS[@]}"; do
+            echo "==> Syncing tag: $TG"
+            git fetch --depth=1 upstream "refs/tags/$TG:refs/tags/$TG"
+            git push origin "refs/tags/$TG:refs/tags/$TG" --force
+          done
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd doris-mirror
+          git remote remove upstream || true
